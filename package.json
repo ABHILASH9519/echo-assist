@@ -9,7 +9,7 @@
     "check": "node --check server.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.900.0",
