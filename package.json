@@ -2,7 +2,7 @@
   "name": "echo-assist",
   "version": "1.0.0",
   "private": true,
-  "description": "Conversational task manager with optional Amazon Bedrock and MCP integrations",
+  "description": "Conversational task manager with optional Amazon Bedrock, PostgreSQL and MCP integrations",
   "type": "module",
   "scripts": {
     "start": "node server.js",
@@ -14,6 +14,7 @@
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.900.0",
     "@modelcontextprotocol/sdk": "^1.20.0",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "pg": "^8.16.3"
   }
 }
