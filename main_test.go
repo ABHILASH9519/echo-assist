@@ -34,3 +34,32 @@ func TestInvalidDateRejected(t *testing.T) {
  a.tasks(rec, httptest.NewRequest(http.MethodPost, "/api/tasks", strings.NewReader(`{"title":"bad","dueDate":"2026-02-31"}`)))
  if rec.Code != http.StatusBadRequest { t.Fatalf("expected 400, got %d", rec.Code) }
 }
+
+func TestTaskUpdateAndDelete(t *testing.T) {
+ a := testApp(t)
+ rec := httptest.NewRecorder()
+ a.tasks(rec, httptest.NewRequest(http.MethodPost, "/api/tasks", strings.NewReader(`{"title":"Original","priority":"low"}`)))
+ if rec.Code != http.StatusCreated { t.Fatalf("create status %d: %s", rec.Code, rec.Body.String()) }
+ var created struct { Task Task `json:"task"` }
+ if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil { t.Fatal(err) }
+
+ rec = httptest.NewRecorder()
+ a.taskByID(rec, httptest.NewRequest(http.MethodPatch, "/api/tasks/"+created.Task.ID, strings.NewReader(`{"title":"Updated","priority":"high","dueDate":"2026-10-30"}`)))
+ if rec.Code != http.StatusOK { t.Fatalf("update status %d: %s", rec.Code, rec.Body.String()) }
+ var updated struct { Task Task `json:"task"` }
+ if err := json.Unmarshal(rec.Body.Bytes(), &updated); err != nil { t.Fatal(err) }
+ if updated.Task.Title != "Updated" || updated.Task.Priority != "high" || updated.Task.DueDate == nil { t.Fatalf("unexpected updated task: %+v", updated.Task) }
+
+ rec = httptest.NewRecorder()
+ a.taskByID(rec, httptest.NewRequest(http.MethodDelete, "/api/tasks/"+created.Task.ID, nil))
+ if rec.Code != http.StatusNoContent { t.Fatalf("delete status %d: %s", rec.Code, rec.Body.String()) }
+ if got := len(a.store.snapshot()); got != 0 { t.Fatalf("expected no tasks after delete, got %d", got) }
+}
+
+func TestStrictJSONRejectsTrailingValue(t *testing.T) {
+ a := testApp(t)
+ rec := httptest.NewRecorder()
+ req := httptest.NewRequest(http.MethodPost, "/api/tasks", strings.NewReader(`{"title":"one"} {"title":"two"}`))
+ a.tasks(rec, req)
+ if rec.Code != http.StatusBadRequest { t.Fatalf("expected 400 for multiple JSON values, got %d", rec.Code) }
+}
