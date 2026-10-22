@@ -56,16 +56,22 @@ function fromDb(row) {
 }
 async function saveTasks() {
   if (pool) {
-    await pool.query('BEGIN');
+    const client = await pool.connect();
     try {
-      await pool.query('DELETE FROM echo_tasks');
-      for (const t of tasks) await pool.query(
+      await client.query('BEGIN');
+      await client.query('DELETE FROM echo_tasks');
+      for (const t of tasks) await client.query(
         'INSERT INTO echo_tasks (id,title,details,completed,priority,due_date,created_at,completed_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
         [t.id,t.title,t.details || '',t.completed,t.priority || 'medium',t.dueDate || null,t.createdAt,t.completedAt || null]
       );
-      await pool.query('COMMIT');
-      return;
-    } catch (error) { await pool.query('ROLLBACK'); throw error; }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+    return;
   }
   fs.mkdirSync(dataDir, { recursive: true });
   fs.writeFileSync(dataFile, JSON.stringify(tasks, null, 2));
@@ -102,12 +108,20 @@ async function completeTask(id) {
   return task;
 }
 function agendaFor(date) {
-  return tasks.filter(t => !t.completed && t.dueDate === date).sort((a,b) => ({high:0,medium:1,low:2}[a.priority]-({high:0,medium:1,low:2}[b.priority])));
+  const rank = { high: 0, medium: 1, low: 2 };
+  return tasks.filter(t => !t.completed && t.dueDate === date)
+    .sort((a, b) => rank[a.priority || 'medium'] - rank[b.priority || 'medium']);
+}
+function localDateString(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 app.get('/api/health', (_req, res) => res.json({ ok: true, app: 'Echo Assist', aiConfigured: Boolean(process.env.BEDROCK_MODEL_ID), storage: storageMode, taskCount: tasks.length }));
 app.get('/api/tasks', (_req, res) => res.json({ tasks }));
 app.get('/api/agenda', (req, res) => {
-  const date = req.query.date || new Date().toISOString().slice(0, 10);
+  const date = req.query.date || localDateString();
   try { cleanDueDate(date); res.json({ date, tasks: agendaFor(date), overdue: tasks.filter(t => !t.completed && t.dueDate && t.dueDate < date) }); }
   catch { res.status(400).json({ error: 'Use a date in YYYY-MM-DD format.' }); }
 });
@@ -167,7 +181,7 @@ app.post('/api/assistant', async (req, res) => {
       return res.json({ reply: summary, action: 'task_listed', tasks: open, mode: 'local' });
     }
     if (/agenda|due today|today's tasks|todays tasks/i.test(message)) {
-      const today = new Date().toISOString().slice(0,10);
+      const today = localDateString();
       const due = agendaFor(today);
       return res.json({ reply: due.length ? `Due today ( ${today} ):\n` + due.map((t,i)=>`${i+1}. [${t.priority}] ${t.title}`).join('\n') : `No open tasks are due today (${today}).`, tasks: due, action: 'agenda_listed', mode: 'local' });
     }
