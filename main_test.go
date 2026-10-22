@@ -108,3 +108,22 @@ func TestAssistantMetadataOrderVariations(t *testing.T) {
   }
  }
 }
+
+
+func TestInvalidTaskPatchIsAtomic(t *testing.T) {
+ a:=testApp(t)
+ w:=requestJSON(t,a,http.MethodPost,"/api/tasks",`{"title":"Original title","priority":"medium"}`)
+ if w.Code!=http.StatusCreated{t.Fatalf("create status %d: %s",w.Code,w.Body.String())}
+ var created struct{Task Task `json:"task"`}
+ if err:=json.Unmarshal(w.Body.Bytes(),&created);err!=nil{t.Fatal(err)}
+ cases:=[]string{
+  `{"title":"Must not persist","priority":"urgent"}`,
+  `{"title":"Must not persist","dueDate":"2026-02-31"}`,
+ }
+ for _,body:=range cases{
+  w=requestJSON(t,a,http.MethodPatch,"/api/tasks/"+created.Task.ID,body)
+  if w.Code!=http.StatusBadRequest{t.Fatalf("expected 400 for %s, got %d: %s",body,w.Code,w.Body.String())}
+  tasks:=a.store.snapshot()
+  if len(tasks)!=1||tasks[0].Title!="Original title"||tasks[0].Priority!="medium"{t.Fatalf("invalid patch partially changed task: %+v",tasks)}
+ }
+}

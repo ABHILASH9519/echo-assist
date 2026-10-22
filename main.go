@@ -135,14 +135,26 @@ func (a *App)taskByID(w http.ResponseWriter,r *http.Request){
  if len(p)!=1{http.NotFound(w,r);return}
  s:=a.store;s.mu.Lock();defer s.mu.Unlock();idx:=-1;for i,t:=range s.tasks{if t.ID==id{idx=i;break}};if idx<0{fail(w,404,"Task not found.");return}
  old:=s.tasks[idx]
- if r.Method=="DELETE"{s.tasks=append(s.tasks[:idx],s.tasks[idx+1:]...);ctx,c:=context.WithTimeout(r.Context(),10*time.Second);defer c();if e:=s.persist(ctx);e!=nil{s.tasks=append(s.tasks,nil...);s.tasks=append(s.tasks[:idx],append([]Task{old},s.tasks[idx:]...)...);fail(w,500,"Could not save task changes.");return};w.WriteHeader(204);return}
- if r.Method=="PATCH"{var b map[string]json.RawMessage;if decode(w,r,&b)!=nil{fail(w,400,"Invalid JSON request.");return}
+ if r.Method=="DELETE" {
+  before:=append([]Task(nil),s.tasks...)
+  s.tasks=append(s.tasks[:idx],s.tasks[idx+1:]...)
+  ctx,c:=context.WithTimeout(r.Context(),10*time.Second);defer c()
+  if e:=s.persist(ctx);e!=nil{s.tasks=before;fail(w,500,"Could not save task changes.");return}
+  w.WriteHeader(204);return
+ }
+ if r.Method=="PATCH" {
+  var b map[string]json.RawMessage
+  if decode(w,r,&b)!=nil{fail(w,400,"Invalid JSON request.");return}
+  updated:=old
   str:=func(k string)(string,bool){raw,ok:=b[k];if !ok{return "",false};var v string;if json.Unmarshal(raw,&v)!=nil{return "",false};return v,true}
-  if _,ok:=b["title"];ok{v,good:=str("title");if !good||clean(v,180)==""{fail(w,400,"Please enter a valid task title.");return};s.tasks[idx].Title=clean(v,180)}
-  if _,ok:=b["details"];ok{v,good:=str("details");if !good{fail(w,400,"Invalid details.");return};s.tasks[idx].Details=clean(v,500)}
-  if _,ok:=b["priority"];ok{v,good:=str("priority");if !good{fail(w,400,"Invalid priority.");return};p,e:=normalizePriority(v);if e!=nil{fail(w,400,e.Error());return};s.tasks[idx].Priority=p}
-  if raw,ok:=b["dueDate"];ok{var v *string;if string(raw)!="null"{var x string;if json.Unmarshal(raw,&x)!=nil{fail(w,400,"Invalid due date.");return};v=&x};d,e:=dueDate(v);if e!=nil{fail(w,400,e.Error());return};s.tasks[idx].DueDate=d}
-  ctx,c:=context.WithTimeout(r.Context(),10*time.Second);defer c();if e:=s.persist(ctx);e!=nil{s.tasks[idx]=old;fail(w,500,"Could not save task changes.");return};jsonOut(w,200,map[string]any{"task":s.tasks[idx]});return
+  if _,ok:=b["title"];ok{v,good:=str("title");if !good||clean(v,180)==""{fail(w,400,"Please enter a valid task title.");return};updated.Title=clean(v,180)}
+  if _,ok:=b["details"];ok{v,good:=str("details");if !good{fail(w,400,"Invalid details.");return};updated.Details=clean(v,500)}
+  if _,ok:=b["priority"];ok{v,good:=str("priority");if !good{fail(w,400,"Invalid priority.");return};p,e:=normalizePriority(v);if e!=nil{fail(w,400,e.Error());return};updated.Priority=p}
+  if raw,ok:=b["dueDate"];ok{var v *string;if string(raw)!="null"{var x string;if json.Unmarshal(raw,&x)!=nil{fail(w,400,"Invalid due date.");return};v=&x};d,e:=dueDate(v);if e!=nil{fail(w,400,e.Error());return};updated.DueDate=d}
+  s.tasks[idx]=updated
+  ctx,c:=context.WithTimeout(r.Context(),10*time.Second);defer c()
+  if e:=s.persist(ctx);e!=nil{s.tasks[idx]=old;fail(w,500,"Could not save task changes.");return}
+  jsonOut(w,200,map[string]any{"task":updated});return
  }
  w.Header().Set("Allow","PATCH, DELETE");fail(w,405,"Method not allowed.")
 }
