@@ -33,6 +33,8 @@ func TestTaskLifecycleAPI(t *testing.T){
  if p.Task.Title!="Ship demo"||p.Task.Priority!="high"||p.Task.DueDate==nil||*p.Task.DueDate!="2026-10-30"{t.Fatalf("unexpected task: %+v",p.Task)}
  w=requestJSON(t,a,http.MethodPatch,"/api/tasks/"+p.Task.ID+"/complete","")
  if w.Code!=http.StatusOK||!strings.Contains(w.Body.String(),`"completed":true`){t.Fatalf("complete status %d: %s",w.Code,w.Body.String())}
+ w=requestJSON(t,a,http.MethodPatch,"/api/tasks/"+p.Task.ID,`{"title":"Ship production demo","priority":"low","dueDate":null}`)
+ if w.Code!=http.StatusOK||!strings.Contains(w.Body.String(),"Ship production demo")||!strings.Contains(w.Body.String(),`"priority":"low"`){t.Fatalf("update status %d: %s",w.Code,w.Body.String())}
  w=requestJSON(t,a,http.MethodDelete,"/api/tasks/"+p.Task.ID,"")
  if w.Code!=http.StatusNoContent{t.Fatalf("delete status %d: %s",w.Code,w.Body.String())}
  if len(a.store.snapshot())!=0{t.Fatal("expected no tasks after delete")}
