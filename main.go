@@ -132,35 +132,134 @@ func (a *App)taskByID(w http.ResponseWriter,r *http.Request){
 }
  func (a *App)stats(w http.ResponseWriter,r *http.Request){if r.Method!="GET"{w.Header().Set("Allow","GET");fail(w,405,"Method not allowed.");return};items:=a.store.snapshot();out:=map[string]any{"total":len(items),"open":0,"completed":0,"overdue":0,"dueToday":0,"byPriority":map[string]int{"high":0,"medium":0,"low":0},"date":appToday(),"timezone":env("APP_TIMEZONE","Asia/Kolkata")};for _,t:=range items{if t.Completed{out["completed"]=out["completed"].(int)+1;continue};out["open"]=out["open"].(int)+1;by:=out["byPriority"].(map[string]int);by[t.Priority]++;if t.DueDate!=nil{if *t.DueDate==appToday(){out["dueToday"]=out["dueToday"].(int)+1}else if *t.DueDate<appToday(){out["overdue"]=out["overdue"].(int)+1}}};jsonOut(w,200,out)}
 func (a *App)agenda(w http.ResponseWriter,r *http.Request){if r.Method!="GET"{w.Header().Set("Allow","GET");fail(w,405,"Method not allowed.");return};date:=r.URL.Query().Get("date");if date==""{date=appToday()};d,e:=dueDate(&date);if e!=nil||d==nil{fail(w,400,"Use a date in YYYY-MM-DD format.");return};due,over:=[]Task{},[]Task{};rank:=map[string]int{"high":0,"medium":1,"low":2};for _,t:=range a.store.snapshot(){if t.Completed||t.DueDate==nil{continue};if *t.DueDate==date{due=append(due,t)}else if *t.DueDate<date{over=append(over,t)}};sort.SliceStable(due,func(i,j int)bool{return rank[due[i].Priority]<rank[due[j].Priority]});sort.SliceStable(over,func(i,j int)bool{return rank[over[i].Priority]<rank[over[j].Priority]});jsonOut(w,200,map[string]any{"date":date,"tasks":due,"overdue":over})}
-func (a *App)assistant(w http.ResponseWriter,r *http.Request){
- if r.Method!="POST"{fail(w,405,"Method not allowed.");return};var b struct{Message string `json:"message"`};if decode(w,r,&b)!=nil{fail(w,400,"Invalid JSON request.");return};msg:=clean(b.Message,1000);if msg==""{fail(w,400,"Enter a message first.");return};lower:=strings.ToLower(msg)
- if m := regexp.MustCompile(`(?i)^(?:add|create|remember|remind me to)\s+(.+)$`).FindStringSubmatch(msg); len(m) == 2 {
-  title := strings.TrimSpace(m[1])
-  var due *string
-  dueRE := regexp.MustCompile(`(?i)\s+(?:due|by)\s+(\d{4}-\d{2}-\d{2})`)
-  if x := dueRE.FindStringSubmatch(title); len(x) == 2 {
-   value := x[1]
-   due = &value
-   title = dueRE.ReplaceAllString(title, "")
-  }
-  prio := "medium"
-  priorityRE := regexp.MustCompile(`(?i)\s+priority\s+(low|medium|high)\s*$`)
-  if x := priorityRE.FindStringSubmatch(title); len(x) == 2 {
-   prio = strings.ToLower(x[1])
-   title = priorityRE.ReplaceAllString(title, "")
-  }
-  t, err := a.store.create(title, "", prio, due)
-  if err != nil { fail(w, 400, err.Error()); return }
-  reply := fmt.Sprintf("Added “%s” with %s priority", t.Title, t.Priority)
-  if t.DueDate != nil { reply += " and a due date of " + *t.DueDate }
-  jsonOut(w, 200, map[string]any{"reply": reply + ".", "action": "task_created", "task": t, "mode": "local"})
+func (a *App)assistant(w http.ResponseWriter, r *http.Request) {
+ if r.Method != http.MethodPost {
+  w.Header().Set("Allow", http.MethodPost)
+  fail(w, http.StatusMethodNotAllowed, "Method not allowed.")
   return
  }
- if (strings.Contains(lower,"task")||strings.Contains(lower,"todo")||strings.Contains(lower,"to-do"))&&(strings.HasPrefix(lower,"list")||strings.HasPrefix(lower,"show")||strings.HasPrefix(lower,"what are")||strings.HasPrefix(lower,"view")){items:=[]Task{};lines:=[]string{};for _,t:=range a.store.snapshot(){if !t.Completed{items=append(items,t);line:=fmt.Sprintf("%d. [%s] %s",len(items),t.Priority,t.Title);if t.DueDate!=nil{line=fmt.Sprintf("%d. [%s] (due %s) %s",len(items),t.Priority,*t.DueDate,t.Title)};lines=append(lines,line)}};reply:=strings.Join(lines,"\n");if len(items)==0{reply="You have no open tasks. Enjoy the breathing room!"};jsonOut(w,200,map[string]any{"reply":reply,"action":"task_listed","tasks":items,"mode":"local"});return}
- if strings.Contains(lower,"agenda")||strings.Contains(lower,"due today")||strings.Contains(lower,"today's tasks")||strings.Contains(lower,"todays tasks"){today:=appToday();items:=[]Task{};for _,t:=range a.store.snapshot(){if !t.Completed&&t.DueDate!=nil&&*t.DueDate==today{items=append(items,t)}};reply:="No open tasks are due today ("+today+").";if len(items)>0{lines:=[]string{};for i,t:=range items{lines=append(lines,fmt.Sprintf("%d. [%s] %s",i+1,t.Priority,t.Title))};reply="Due today ( "+today+" ):\n"+strings.Join(lines,"\n")};jsonOut(w,200,map[string]any{"reply":reply,"tasks":items,"action":"agenda_listed","mode":"local"});return}
- if m:=regexp.MustCompile(`(?i)^(?:complete|finish|done|mark done)\s+(.+)$`).FindStringSubmatch(msg);len(m)==2{wanted:=strings.ToLower(strings.TrimSpace(m[1]));var match *Task;for _,t:=range a.store.snapshot(){if !t.Completed&&(strings.ToLower(t.Title)==wanted||strings.Contains(strings.ToLower(t.Title),wanted)){v:=t;match=&v;break}};if match==nil{jsonOut(w,200,map[string]any{"reply":"I could not find an open task matching that. Try “list my tasks” to see what is open.","mode":"local"});return};t,e:=a.store.complete(match.ID);if e!=nil{fail(w,500,"Could not complete that task.");return};jsonOut(w,200,map[string]any{"reply":"Completed “"+t.Title+"”. Nice work!","action":"task_completed","task":t,"mode":"local"});return}
- if model:=os.Getenv("BEDROCK_MODEL_ID");model!=""&&a.bedrock!=nil&&a.aiConfigured{ctx,c:=context.WithTimeout(r.Context(),25*time.Second);defer c();out,e:=a.bedrock.Converse(ctx,&bedrockruntime.ConverseInput{ModelId:aws.String(model),System:[]bt.SystemContentBlock{&bt.SystemContentBlockMemberText{Value:"You are Echo Assist, a concise and encouraging productivity assistant. Help the user plan tasks. Never claim to have changed tasks unless the application confirms it."}},Messages:[]bt.Message{{Role:bt.ConversationRoleUser,Content:[]bt.ContentBlock{&bt.ContentBlockMemberText{Value:msg}}}},InferenceConfig:&bt.InferenceConfiguration{MaxTokens:aws.Int32(350),Temperature:aws.Float32(.4)}});if e!=nil{log.Printf("Bedrock failed: %v",e);fail(w,502,"The assistant could not complete that request. Check server configuration and try again.");return};reply:="I could not generate a response just now.";if out.Output!=nil{if m,ok:=out.Output.(*bt.ConverseOutputMemberMessage);ok{var parts []string;for _,v:=range m.Value.Content{if t,ok:=v.(*bt.ContentBlockMemberText);ok{parts=append(parts,t.Value)}};if strings.TrimSpace(strings.Join(parts,""))!=""{reply=strings.TrimSpace(strings.Join(parts,""))}}};jsonOut(w,200,map[string]any{"reply":reply,"mode":"bedrock"});return}
- jsonOut(w,200,map[string]any{"reply":"I can manage tasks locally with “add prepare demo”, “list my tasks”, “complete prepare demo”, or “agenda today”. Add “priority high” or “due 2026-10-30” when creating a task. Open-ended AI responses are not enabled yet: configure BEDROCK_MODEL_ID and AWS credentials to connect Amazon Bedrock.","mode":"local"})
+ var body struct { Message string `json:"message"` }
+ if decode(w, r, &body) != nil {
+  fail(w, http.StatusBadRequest, "Invalid JSON request.")
+  return
+ }
+ msg := clean(body.Message, 1000)
+ if msg == "" {
+  fail(w, http.StatusBadRequest, "Enter a message first.")
+  return
+ }
+ lower := strings.ToLower(msg)
+
+ addPattern := regexp.MustCompile("(?i)^(?:add|create|remember|remind me to)\\s+(.+)$")
+ if match := addPattern.FindStringSubmatch(msg); len(match) == 2 {
+  title := strings.TrimSpace(match[1])
+  prio := "medium"
+  priorityPattern := regexp.MustCompile("(?i)\\s+priority\\s+(low|medium|high)\\s*$")
+  if priorityMatch := priorityPattern.FindStringSubmatch(title); len(priorityMatch) == 2 {
+   prio = strings.ToLower(priorityMatch[1])
+   title = priorityPattern.ReplaceAllString(title, "")
+  }
+  var due *string
+  duePattern := regexp.MustCompile("(?i)\\s+(?:due|by)\\s+(\\d{4}-\\d{2}-\\d{2})\\s*$")
+  if dueMatch := duePattern.FindStringSubmatch(title); len(dueMatch) == 2 {
+   value := dueMatch[1]
+   due = &value
+   title = duePattern.ReplaceAllString(title, "")
+  }
+  task, err := a.store.create(title, "", prio, due)
+  if err != nil {
+   fail(w, http.StatusBadRequest, err.Error())
+   return
+  }
+  reply := fmt.Sprintf("Added “%s” with %s priority", task.Title, task.Priority)
+  if task.DueDate != nil { reply += " and a due date of " + *task.DueDate }
+  jsonOut(w, http.StatusOK, map[string]any{"reply": reply + ".", "action": "task_created", "task": task, "mode": "local"})
+  return
+ }
+
+ isTaskList := strings.Contains(lower, "task") || strings.Contains(lower, "todo") || strings.Contains(lower, "to-do")
+ isListIntent := strings.HasPrefix(lower, "list") || strings.HasPrefix(lower, "show") || strings.HasPrefix(lower, "what are") || strings.HasPrefix(lower, "view")
+ if isTaskList && isListIntent {
+  items := []Task{}
+  lines := []string{}
+  for _, task := range a.store.snapshot() {
+   if task.Completed { continue }
+   items = append(items, task)
+   line := fmt.Sprintf("%d. [%s] %s", len(items), task.Priority, task.Title)
+   if task.DueDate != nil { line = fmt.Sprintf("%d. [%s] (due %s) %s", len(items), task.Priority, *task.DueDate, task.Title) }
+   lines = append(lines, line)
+  }
+  reply := strings.Join(lines, "\n")
+  if len(items) == 0 { reply = "You have no open tasks. Enjoy the breathing room!" }
+  jsonOut(w, http.StatusOK, map[string]any{"reply": reply, "action": "task_listed", "tasks": items, "mode": "local"})
+  return
+ }
+
+ if strings.Contains(lower, "agenda") || strings.Contains(lower, "due today") || strings.Contains(lower, "today's tasks") || strings.Contains(lower, "todays tasks") {
+  today := appToday()
+  items := []Task{}
+  for _, task := range a.store.snapshot() {
+   if !task.Completed && task.DueDate != nil && *task.DueDate == today { items = append(items, task) }
+  }
+  reply := "No open tasks are due today (" + today + ")."
+  if len(items) > 0 {
+   lines := []string{}
+   for i, task := range items { lines = append(lines, fmt.Sprintf("%d. [%s] %s", i+1, task.Priority, task.Title)) }
+   reply = "Due today (" + today + "):\n" + strings.Join(lines, "\n")
+  }
+  jsonOut(w, http.StatusOK, map[string]any{"reply": reply, "tasks": items, "action": "agenda_listed", "mode": "local"})
+  return
+ }
+
+ completePattern := regexp.MustCompile("(?i)^(?:complete|finish|done|mark done)\\s+(.+)$")
+ if match := completePattern.FindStringSubmatch(msg); len(match) == 2 {
+  wanted := strings.ToLower(strings.TrimSpace(match[1]))
+  var found *Task
+  for _, task := range a.store.snapshot() {
+   if !task.Completed && (strings.ToLower(task.Title) == wanted || strings.Contains(strings.ToLower(task.Title), wanted)) {
+    copy := task
+    found = &copy
+    break
+   }
+  }
+  if found == nil {
+   jsonOut(w, http.StatusOK, map[string]any{"reply": "I could not find an open task matching that. Try “list my tasks” to see what is open.", "mode": "local"})
+   return
+  }
+  task, err := a.store.complete(found.ID)
+  if err != nil { fail(w, http.StatusInternalServerError, "Could not complete that task."); return }
+  jsonOut(w, http.StatusOK, map[string]any{"reply": "Completed “" + task.Title + "”. Nice work!", "action": "task_completed", "task": task, "mode": "local"})
+  return
+ }
+
+ if model := os.Getenv("BEDROCK_MODEL_ID"); model != "" && a.bedrock != nil && a.aiConfigured {
+  ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+  defer cancel()
+  out, err := a.bedrock.Converse(ctx, &bedrockruntime.ConverseInput{
+   ModelId: aws.String(model),
+   System: []bt.SystemContentBlock{&bt.SystemContentBlockMemberText{Value: "You are Echo Assist, a concise and encouraging productivity assistant. Help the user plan tasks. Never claim to have changed tasks unless the application confirms it."}},
+   Messages: []bt.Message{{Role: bt.ConversationRoleUser, Content: []bt.ContentBlock{&bt.ContentBlockMemberText{Value: msg}}}},
+   InferenceConfig: &bt.InferenceConfiguration{MaxTokens: aws.Int32(350), Temperature: aws.Float32(0.4)},
+  })
+  if err != nil {
+   log.Printf("Bedrock failed: %v", err)
+   fail(w, http.StatusBadGateway, "The assistant could not complete that request. Check server configuration and try again.")
+   return
+  }
+  reply := "I could not generate a response just now."
+  if out.Output != nil {
+   if message, ok := out.Output.(*bt.ConverseOutputMemberMessage); ok {
+    parts := []string{}
+    for _, block := range message.Value.Content {
+     if part, ok := block.(*bt.ContentBlockMemberText); ok { parts = append(parts, part.Value) }
+    }
+    if joined := strings.TrimSpace(strings.Join(parts, "")); joined != "" { reply = joined }
+   }
+  }
+  jsonOut(w, http.StatusOK, map[string]any{"reply": reply, "mode": "bedrock"})
+  return
+ }
+ jsonOut(w, http.StatusOK, map[string]any{"reply": "I can manage tasks locally with “add prepare demo”, “list my tasks”, “complete prepare demo”, or “agenda today”. Add “priority high” or “due 2026-10-30” when creating a task. Open-ended AI responses are not enabled yet: configure BEDROCK_MODEL_ID and AWS credentials to connect Amazon Bedrock.", "mode": "local"})
 }
 func (a *App)mcp(w http.ResponseWriter,r *http.Request){
  if r.Method!="POST"{w.Header().Set("Allow","POST");fail(w,405,"Use POST for stateless MCP requests.");return}
