@@ -81,3 +81,28 @@ func TestHealthReportsRuntimeMode(t *testing.T){
  a:=testApp(t);w:=httptest.NewRecorder();a.health(w,httptest.NewRequest(http.MethodGet,"/api/health",nil))
  if w.Code!=http.StatusOK||!strings.Contains(w.Body.String(),`"language":"Go"`){t.Fatalf("health response %d: %s",w.Code,w.Body.String())}
 }
+
+func TestAssistantMetadataOrderVariations(t *testing.T) {
+ a := testApp(t)
+ commands := []struct {
+  message, title, priority, due string
+ }{
+  {message: "add prepare launch priority high due 2026-10-30", title: "prepare launch", priority: "high", due: "2026-10-30"},
+  {message: "add submit report due 2026-10-31 priority low", title: "submit report", priority: "low", due: "2026-10-31"},
+ }
+ for _, cmd := range commands {
+  w := requestJSON(t, a, http.MethodPost, "/api/assistant", `{"message":"`+cmd.message+`"}`)
+  if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"task_created"`) {
+   t.Fatalf("assistant command %q failed: status=%d body=%s", cmd.message, w.Code, w.Body.String())
+  }
+ }
+ tasks := a.store.snapshot()
+ if len(tasks) != 2 { t.Fatalf("expected 2 tasks, got %d", len(tasks)) }
+ for _, cmd := range commands {
+  var found *Task
+  for i := range tasks { if tasks[i].Title == cmd.title { found = &tasks[i]; break } }
+  if found == nil || found.Priority != cmd.priority || found.DueDate == nil || *found.DueDate != cmd.due {
+   t.Fatalf("command %q parsed incorrectly: %+v", cmd.message, found)
+  }
+ }
+}
