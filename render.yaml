@@ -11,6 +11,8 @@ services:
     envVars:
       - key: AWS_REGION
         value: ap-south-1
+      - key: APP_TIMEZONE
+        value: Asia/Kolkata
       - key: DATABASE_URL
         sync: false
       - key: BEDROCK_MODEL_ID
