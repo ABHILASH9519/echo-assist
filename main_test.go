@@ -63,3 +63,35 @@ func TestStrictJSONRejectsTrailingValue(t *testing.T) {
  a.tasks(rec, req)
  if rec.Code != http.StatusBadRequest { t.Fatalf("expected 400 for multiple JSON values, got %d", rec.Code) }
 }
+
+func TestMCPToolDiscoveryAndCreate(t *testing.T) {
+ a := testApp(t)
+ reqBody := `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`
+ rec := httptest.NewRecorder()
+ a.mcp(rec, httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(reqBody)))
+ if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "add_task") || !strings.Contains(rec.Body.String(), "complete_task") {
+  t.Fatalf("MCP tool discovery failed: status=%d body=%s", rec.Code, rec.Body.String())
+ }
+
+ reqBody = `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"add_task","arguments":{"title":"MCP test task","priority":"high"}}}`
+ rec = httptest.NewRecorder()
+ a.mcp(rec, httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(reqBody)))
+ if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "MCP test task") {
+  t.Fatalf("MCP add_task failed: status=%d body=%s", rec.Code, rec.Body.String())
+ }
+ if got := len(a.store.snapshot()); got != 1 { t.Fatalf("expected one task after MCP call, got %d", got) }
+}
+
+func TestAssistantTaskCommand(t *testing.T) {
+ a := testApp(t)
+ reqBody := `{"message":"add prepare launch priority high due 2026-10-30"}`
+ rec := httptest.NewRecorder()
+ a.assistant(rec, httptest.NewRequest(http.MethodPost, "/api/assistant", strings.NewReader(reqBody)))
+ if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "task_created") {
+  t.Fatalf("assistant task command failed: status=%d body=%s", rec.Code, rec.Body.String())
+ }
+ items := a.store.snapshot()
+ if len(items) != 1 || items[0].Title != "prepare launch" || items[0].Priority != "high" || items[0].DueDate == nil || *items[0].DueDate != "2026-10-30" {
+  t.Fatalf("unexpected task from assistant: %+v", items)
+ }
+}
