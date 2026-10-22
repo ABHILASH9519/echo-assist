@@ -47,14 +47,30 @@ func main() {
  ctx:=context.Background()
  dataDir:=env("DATA_DIR",".data"); if err:=os.MkdirAll(dataDir,0750);err!=nil{log.Fatal(err)}
  s:=&Store{file:filepath.Join(dataDir,"tasks.json"),mode:"file",tasks:[]Task{}}
- if dsn:=os.Getenv("DATABASE_URL");dsn!="" {
-  db,err:=sql.Open("pgx",dsn)
-  if err==nil {db.SetMaxOpenConns(5); db.SetMaxIdleConns(2); c,cancel:=context.WithTimeout(ctx,8*time.Second);err=db.PingContext(c);cancel()}
-  if err==nil {_,err=db.ExecContext(ctx,`CREATE TABLE IF NOT EXISTS echo_tasks (id TEXT PRIMARY KEY,title TEXT NOT NULL,details TEXT NOT NULL DEFAULT '',completed BOOLEAN NOT NULL DEFAULT FALSE,priority TEXT NOT NULL DEFAULT 'medium',due_date DATE NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),completed_at TIMESTAMPTZ NULL)`)}
-  if err==nil {s.db=db;s.mode="postgres";err=s.loadDB(ctx)}
-  if err!=nil {if db!=nil{_ = db.Close()};s.db=nil;s.mode="file";log.Printf("PostgreSQL unavailable; using file storage: %v",err)}
+ if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
+  db, err := sql.Open("pgx", dsn)
+  if err == nil {
+   db.SetMaxOpenConns(5)
+   db.SetMaxIdleConns(2)
+   pingCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+   err = db.PingContext(pingCtx)
+   cancel()
+  }
+  if err == nil {
+   _, err = db.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS echo_tasks (id TEXT PRIMARY KEY,title TEXT NOT NULL,details TEXT NOT NULL DEFAULT '',completed BOOLEAN NOT NULL DEFAULT FALSE,priority TEXT NOT NULL DEFAULT 'medium',due_date DATE NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),completed_at TIMESTAMPTZ NULL)")
+  }
+  if err == nil {
+   s.db = db
+   s.mode = "postgres"
+   err = s.loadDB(ctx)
+  }
+  if err != nil {
+   if db != nil { _ = db.Close() }
+   log.Fatalf("DATABASE_URL is set but PostgreSQL is unavailable: %v", err)
+  }
+ } else {
+  s.loadFile()
  }
- if s.db==nil{s.loadFile()}
  region:=env("AWS_REGION","ap-south-1")
  cfg,awsErr:=config.LoadDefaultConfig(ctx,config.WithRegion(region))
  app:=&App{store:s,region:region,startedAt:time.Now()}
