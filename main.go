@@ -18,6 +18,7 @@ import (
  "strings"
  "sync"
  "time"
+ _ "time/tzdata"
  "os/signal"
  "syscall"
 
