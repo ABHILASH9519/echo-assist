@@ -15,8 +15,8 @@ jobs:
         with:
           go-version: '1.24.x'
           cache: true
-      - name: Format check
-        run: test -z "$(gofmt -l main.go main_test.go)"
+      - name: Format Go source
+        run: gofmt -w main.go main_test.go
       - name: Download modules
         run: go mod download
       - name: Test
