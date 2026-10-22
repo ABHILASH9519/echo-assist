@@ -1,73 +1,42 @@
-# Echo Assist
+# Echo Assist — Go backend
 
-Echo Assist is a productivity command center with a task dashboard, REST API, MCP task tools, and optional Amazon Bedrock responses.
+Echo Assist is a productivity command center with an HTML/CSS/JavaScript frontend and a Go backend. The Go service provides task management, an agenda API, optional PostgreSQL persistence, optional Amazon Bedrock responses, and stateless MCP task tools.
 
 ## Features
-
-- Create, search, list, complete, and delete tasks.
-- Set task priority (low, medium, high) and optional due dates.
-- Daily agenda endpoint shows tasks due today and overdue tasks.
-- Natural-language task commands: `add prepare demo`, `list my tasks`, `complete prepare demo`, and `agenda today`.
-- Add task metadata in a command, e.g. `add prepare demo priority high due 2026-10-30`.
-- MCP Streamable HTTP endpoint at `POST /mcp` with `add_task`, `list_tasks`, and `complete_task` tools.
-- Optional PostgreSQL persistence when `DATABASE_URL` is configured; JSON-file fallback for local prototyping.
-- Optional Amazon Bedrock Converse API for open-ended assistant responses. The UI reports whether Bedrock is configured.
+- Create, search, list, complete, update, and delete tasks.
+- Task priority (low, medium, high) and due dates.
+- Daily agenda endpoint includes due-today and overdue tasks.
+- Natural-language task commands for adding, listing, completing, and reviewing agenda tasks.
+- MCP HTTP endpoint at POST /mcp with add_task, list_tasks, and complete_task tools.
+- PostgreSQL persistence when DATABASE_URL is configured; JSON-file fallback for local development.
+- Optional Amazon Bedrock Converse API for open-ended assistant responses.
 
 ## Run locally
+Requires Go 1.24 or later.
 
-Requires Node.js 22 or later.
+    go mod download
+    go run .
 
-```bash
-npm install
-cp .env.example .env
-npm start
-```
+Open http://localhost:3000. Keep the public directory alongside the executable.
 
-On Windows PowerShell, use `Copy-Item .env.example .env` instead of `cp`. Open http://localhost:3000.
-
-## Storage
-
-For durable storage, provision a PostgreSQL database and set `DATABASE_URL` in the app's runtime environment. The server creates the `echo_tasks` table on startup. For a TLS-enabled provider, leave `PGSSL` unset. Set `PGSSL=disable` only for local PostgreSQL without TLS.
-
-Without `DATABASE_URL`, tasks are stored in `.data/tasks.json` (or the directory set by `DATA_DIR`). That file is not durable on an ephemeral hosting filesystem.
-
-## Amazon Bedrock (optional)
-
-1. Ensure your AWS account has access to a supported Bedrock model in your chosen region.
-2. Set `AWS_REGION` and `BEDROCK_MODEL_ID` in the runtime environment.
-3. Configure AWS credentials using an IAM role or your host's secret manager. Never commit credentials.
-4. Verify `GET /api/health` reports `aiConfigured: true`, then send an open-ended assistant request and verify the response.
-
-Task-management commands are handled by the application itself and report `mode: local`. Open-ended responses use Bedrock only when the model ID and valid AWS credentials are available, and report `mode: bedrock`. A configured model ID alone does not guarantee that model access works.
+## Configuration
+PORT defaults to 3000. AWS_REGION defaults to ap-south-1. Set BEDROCK_MODEL_ID to a model available to your AWS account. Set DATABASE_URL for PostgreSQL persistence. Configure AWS credentials through IAM or your host's secret settings; never commit keys.
 
 ## API
+- GET /api/health
+- GET /api/tasks
+- POST /api/tasks with a JSON title, optional details, priority, and dueDate
+- PATCH /api/tasks/:id
+- PATCH /api/tasks/:id/complete
+- DELETE /api/tasks/:id
+- GET /api/agenda?date=YYYY-MM-DD
+- POST /api/assistant with a JSON message
+- POST /mcp for MCP JSON-RPC initialization, tool discovery, and tool calls
 
-- `GET /api/health` — app status, storage mode, Bedrock configuration status.
-- `GET /api/tasks`
-- `POST /api/tasks` with `{"title":"Prepare demo","priority":"high","dueDate":"2026-10-30"}`
-- `PATCH /api/tasks/:id` — update title, details, priority, or due date.
-- `PATCH /api/tasks/:id/complete`
-- `DELETE /api/tasks/:id`
-- `GET /api/agenda?date=2026-10-30`
-- `POST /api/assistant` with `{"message":"Add prepare demo priority high due 2026-10-30"}`
+## Deploy to Render
+The Dockerfile and render.yaml define a separate Go service. Import the Blueprint or create a Docker web service from this repository and configure secret environment variables. This deliberately keeps the existing Node deployment untouched until the Go version is built and smoke-tested. Once verified, switch traffic and retire the old service.
 
-## MCP
-
-The server exposes a stateless Streamable HTTP MCP endpoint at `/mcp`. Use an MCP client that supports Streamable HTTP and point it to your deployed base URL plus `/mcp`. Verify with a real MCP inspector/client before describing this integration as tested.
-
-## Deployment notes
-
-The app listens on `0.0.0.0` and uses `PORT`. Set `DATABASE_URL` to a managed database for durable production storage. Some serverless or ephemeral filesystems reset data on restart/redeploy.
+For durable storage, connect PostgreSQL and verify /api/health reports storage=postgres. File storage on ephemeral hosting may be lost on restart.
 
 ## Security and limitations
-
-This is a hackathon MVP, not a multi-user production service. It has no authentication or per-user task isolation. Do not store sensitive personal data. Configure Bedrock and database access through IAM/host secrets. Before production, add authentication, user-scoped data access, request rate limiting, structured logging, and end-to-end tests.
-
-## Hackathon submission checklist
-
-- [ ] Test task CRUD and priority/due-date behavior in the deployed app.
-- [ ] Verify the MCP endpoint with a real MCP client.
-- [ ] Configure and verify a real Bedrock response before claiming the integration is active.
-- [ ] Verify PostgreSQL is active in `/api/health` before claiming durable database storage is live.
-- [ ] Record a public English demo video under the event's time limit.
-- [ ] Keep the Devpost description aligned with verified features.
+This is a hackathon MVP without authentication or per-user task isolation. Do not store sensitive personal data. Before production, add authentication, user-scoped access, rate limiting, and integration tests. Verify MCP using a real MCP client and verify a real Bedrock response before claiming either integration is live.
