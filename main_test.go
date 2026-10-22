@@ -17,7 +17,7 @@ func testApp(t *testing.T) *App {
 func requestJSON(t *testing.T,a *App,method,path,body string)*httptest.ResponseRecorder{
  t.Helper();r:=httptest.NewRequest(method,path,strings.NewReader(body));r.Header.Set("Content-Type","application/json");w:=httptest.NewRecorder()
  switch {
- case path=="/api/tasks":a.tasks(w,r)
+ case path=="/api/tasks"||strings.HasPrefix(path,"/api/tasks?"):a.tasks(w,r)
  case path=="/api/stats":a.stats(w,r)
  case strings.HasPrefix(path,"/api/tasks/"):a.taskByID(w,r)
  case strings.HasPrefix(path,"/api/agenda"):a.agenda(w,r)
