@@ -20,7 +20,7 @@ func requestJSON(t *testing.T,a *App,method,path,body string)*httptest.ResponseR
  case path=="/api/tasks":a.tasks(w,r)
  case path=="/api/stats":a.stats(w,r)
  case strings.HasPrefix(path,"/api/tasks/"):a.taskByID(w,r)
- case path=="/api/agenda":a.agenda(w,r)
+ case strings.HasPrefix(path,"/api/agenda"):a.agenda(w,r)
  case path=="/api/assistant":a.assistant(w,r)
  case path=="/mcp":a.mcp(w,r)
  default:t.Fatalf("unhandled test path %s",path)
