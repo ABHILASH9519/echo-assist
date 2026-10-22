@@ -64,7 +64,14 @@ func env(k,d string)string{if v:=strings.TrimSpace(os.Getenv(k));v!=""{return v}
 func securityHeaders(next http.Handler)http.Handler{return http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){w.Header().Set("X-Content-Type-Options","nosniff");w.Header().Set("Referrer-Policy","strict-origin-when-cross-origin");w.Header().Set("X-Frame-Options","DENY");next.ServeHTTP(w,r)})}
 func jsonOut(w http.ResponseWriter,status int,v any){w.Header().Set("Content-Type","application/json; charset=utf-8");w.WriteHeader(status);_ = json.NewEncoder(w).Encode(v)}
 func fail(w http.ResponseWriter,status int,msg string){jsonOut(w,status,apiError{msg})}
-func decode(r *http.Request,v any)error{defer r.Body.Close();d:=json.NewDecoder(http.MaxBytesReader(nil,r.Body,32<<10));return d.Decode(v)}
+func decode(w http.ResponseWriter,r *http.Request,v any)error{
+ defer r.Body.Close()
+ d:=json.NewDecoder(http.MaxBytesReader(w,r.Body,32<<10))
+ if err:=d.Decode(v);err!=nil{return err}
+ var extra any
+ if err:=d.Decode(&extra);err!=io.EOF{return errors.New("request body must contain a single JSON value")}
+ return nil
+}
 func (s *Store)loadFile(){b,e:=os.ReadFile(s.file);if e==nil{if json.Unmarshal(b,&s.tasks)!=nil{s.tasks=[]Task{}}}else{s.tasks=[]Task{}}}
 func (s *Store)loadDB(ctx context.Context)error{
  rows,e:=s.db.QueryContext(ctx,`SELECT id,title,details,completed,priority,due_date::text,created_at,completed_at FROM echo_tasks ORDER BY created_at DESC`);if e!=nil{return e};defer rows.Close();out:=[]Task{}
@@ -87,7 +94,7 @@ func (s *Store)create(title,details,prio string,due *string)(Task,error){
 }
 func (s *Store)complete(id string)(Task,error){s.mu.Lock();defer s.mu.Unlock();for i:=range s.tasks{if s.tasks[i].ID==id{old:=s.tasks[i];now:=time.Now().UTC();s.tasks[i].Completed=true;s.tasks[i].CompletedAt=&now;ctx,cancel:=context.WithTimeout(context.Background(),10*time.Second);defer cancel();if e:=s.persist(ctx);e!=nil{s.tasks[i]=old;return Task{},e};return s.tasks[i],nil}};return Task{},errors.New("Task not found.")}
 func (a *App)health(w http.ResponseWriter,r *http.Request){if r.Method!="GET"{fail(w,405,"Method not allowed.");return};jsonOut(w,200,map[string]any{"ok":true,"app":"Echo Assist","language":"Go","aiConfigured":os.Getenv("BEDROCK_MODEL_ID")!="","storage":a.store.mode,"taskCount":len(a.store.snapshot())})}
-func (a *App)tasks(w http.ResponseWriter,r *http.Request){switch r.Method{case "GET":jsonOut(w,200,map[string]any{"tasks":a.store.snapshot()});case "POST":var b struct{Title string `json:"title"`;Details string `json:"details"`;Priority string `json:"priority"`;DueDate *string `json:"dueDate"`};if decode(r,&b)!=nil{fail(w,400,"Invalid JSON request.");return};t,e:=a.store.create(b.Title,b.Details,b.Priority,b.DueDate);if e!=nil{fail(w,400,e.Error());return};jsonOut(w,201,map[string]any{"task":t});default:w.Header().Set("Allow","GET, POST");fail(w,405,"Method not allowed.")}}
+func (a *App)tasks(w http.ResponseWriter,r *http.Request){switch r.Method{case "GET":jsonOut(w,200,map[string]any{"tasks":a.store.snapshot()});case "POST":var b struct{Title string `json:"title"`;Details string `json:"details"`;Priority string `json:"priority"`;DueDate *string `json:"dueDate"`};if decode(w,r,&b)!=nil{fail(w,400,"Invalid JSON request.");return};t,e:=a.store.create(b.Title,b.Details,b.Priority,b.DueDate);if e!=nil{fail(w,400,e.Error());return};jsonOut(w,201,map[string]any{"task":t});default:w.Header().Set("Allow","GET, POST");fail(w,405,"Method not allowed.")}}
 func (a *App)taskByID(w http.ResponseWriter,r *http.Request){
  rest:=strings.Trim(strings.TrimPrefix(r.URL.Path,"/api/tasks/"),"/");p:=strings.Split(rest,"/");if rest==""{http.NotFound(w,r);return};id:=p[0]
  if len(p)==2&&p[1]=="complete"&&r.Method=="PATCH"{t,e:=a.store.complete(id);if e!=nil{fail(w,404,e.Error());return};jsonOut(w,200,map[string]any{"task":t});return}
@@ -95,7 +102,7 @@ func (a *App)taskByID(w http.ResponseWriter,r *http.Request){
  s:=a.store;s.mu.Lock();defer s.mu.Unlock();idx:=-1;for i,t:=range s.tasks{if t.ID==id{idx=i;break}};if idx<0{fail(w,404,"Task not found.");return}
  old:=s.tasks[idx]
  if r.Method=="DELETE"{s.tasks=append(s.tasks[:idx],s.tasks[idx+1:]...);ctx,c:=context.WithTimeout(r.Context(),10*time.Second);defer c();if e:=s.persist(ctx);e!=nil{s.tasks=append(s.tasks,nil...);s.tasks=append(s.tasks[:idx],append([]Task{old},s.tasks[idx:]...)...);fail(w,500,"Could not save task changes.");return};w.WriteHeader(204);return}
- if r.Method=="PATCH"{var b map[string]json.RawMessage;if decode(r,&b)!=nil{fail(w,400,"Invalid JSON request.");return}
+ if r.Method=="PATCH"{var b map[string]json.RawMessage;if decode(w,r,&b)!=nil{fail(w,400,"Invalid JSON request.");return}
   str:=func(k string)(string,bool){raw,ok:=b[k];if !ok{return "",false};var v string;if json.Unmarshal(raw,&v)!=nil{return "",false};return v,true}
   if _,ok:=b["title"];ok{v,good:=str("title");if !good||clean(v,180)==""{fail(w,400,"Please enter a valid task title.");return};s.tasks[idx].Title=clean(v,180)}
   if _,ok:=b["details"];ok{v,good:=str("details");if !good{fail(w,400,"Invalid details.");return};s.tasks[idx].Details=clean(v,500)}
@@ -107,7 +114,7 @@ func (a *App)taskByID(w http.ResponseWriter,r *http.Request){
 }
 func (a *App)agenda(w http.ResponseWriter,r *http.Request){if r.Method!="GET"{fail(w,405,"Method not allowed.");return};date:=r.URL.Query().Get("date");if date==""{date=time.Now().Format("2006-01-02")};d,e:=dueDate(&date);if e!=nil||d==nil{fail(w,400,"Use a date in YYYY-MM-DD format.");return};due,over:=[]Task{},[]Task{};rank:=map[string]int{"high":0,"medium":1,"low":2};for _,t:=range a.store.snapshot(){if t.Completed||t.DueDate==nil{continue};if *t.DueDate==date{due=append(due,t)}else if *t.DueDate<date{over=append(over,t)}};sort.SliceStable(due,func(i,j int)bool{return rank[due[i].Priority]<rank[due[j].Priority]});jsonOut(w,200,map[string]any{"date":date,"tasks":due,"overdue":over})}
 func (a *App)assistant(w http.ResponseWriter,r *http.Request){
- if r.Method!="POST"{fail(w,405,"Method not allowed.");return};var b struct{Message string `json:"message"`};if decode(r,&b)!=nil{fail(w,400,"Invalid JSON request.");return};msg:=clean(b.Message,1000);if msg==""{fail(w,400,"Enter a message first.");return};lower:=strings.ToLower(msg)
+ if r.Method!="POST"{fail(w,405,"Method not allowed.");return};var b struct{Message string `json:"message"`};if decode(w,r,&b)!=nil{fail(w,400,"Invalid JSON request.");return};msg:=clean(b.Message,1000);if msg==""{fail(w,400,"Enter a message first.");return};lower:=strings.ToLower(msg)
  if m:=regexp.MustCompile(`(?i)^(?:add|create|remember|remind me to)\s+(.+)$`).FindStringSubmatch(msg);len(m)==2{title:=strings.TrimSpace(m[1]);prio:="medium";pr:=regexp.MustCompile(`(?i)\s+priority\s+(low|medium|high)\s*$`);if x:=pr.FindStringSubmatch(title);len(x)==2{prio=strings.ToLower(x[1]);title=pr.ReplaceAllString(title,"")};var due *string;dr:=regexp.MustCompile(`(?i)\s+(?:due|by)\s+(\d{4}-\d{2}-\d{2})\s*$`);if x:=dr.FindStringSubmatch(title);len(x)==2{v:=x[1];due=&v;title=dr.ReplaceAllString(title,"")};t,e:=a.store.create(title,"",prio,due);if e!=nil{fail(w,400,e.Error());return};reply:=fmt.Sprintf("Added “%s” with %s priority",t.Title,t.Priority);if t.DueDate!=nil{reply+=" and a due date of "+*t.DueDate};jsonOut(w,200,map[string]any{"reply":reply+".","action":"task_created","task":t,"mode":"local"});return}
  if (strings.Contains(lower,"task")||strings.Contains(lower,"todo")||strings.Contains(lower,"to-do"))&&(strings.HasPrefix(lower,"list")||strings.HasPrefix(lower,"show")||strings.HasPrefix(lower,"what are")||strings.HasPrefix(lower,"view")){items:=[]Task{};lines:=[]string{};for _,t:=range a.store.snapshot(){if !t.Completed{items=append(items,t);line:=fmt.Sprintf("%d. [%s] %s",len(items),t.Priority,t.Title);if t.DueDate!=nil{line=fmt.Sprintf("%d. [%s] (due %s) %s",len(items),t.Priority,*t.DueDate,t.Title)};lines=append(lines,line)}};reply:=strings.Join(lines,"\n");if len(items)==0{reply="You have no open tasks. Enjoy the breathing room!"};jsonOut(w,200,map[string]any{"reply":reply,"action":"task_listed","tasks":items,"mode":"local"});return}
  if strings.Contains(lower,"agenda")||strings.Contains(lower,"due today")||strings.Contains(lower,"today's tasks")||strings.Contains(lower,"todays tasks"){today:=time.Now().Format("2006-01-02");items:=[]Task{};for _,t:=range a.store.snapshot(){if !t.Completed&&t.DueDate!=nil&&*t.DueDate==today{items=append(items,t)}};reply:="No open tasks are due today ("+today+").";if len(items)>0{lines:=[]string{};for i,t:=range items{lines=append(lines,fmt.Sprintf("%d. [%s] %s",i+1,t.Priority,t.Title))};reply="Due today ( "+today+" ):\n"+strings.Join(lines,"\n")};jsonOut(w,200,map[string]any{"reply":reply,"tasks":items,"action":"agenda_listed","mode":"local"});return}
@@ -118,7 +125,7 @@ func (a *App)assistant(w http.ResponseWriter,r *http.Request){
 func (a *App)mcp(w http.ResponseWriter,r *http.Request){
  if r.Method!="POST"{w.Header().Set("Allow","POST");fail(w,405,"Use POST for stateless MCP requests.");return}
  var q struct{JSONRPC string `json:"jsonrpc"`;ID json.RawMessage `json:"id"`;Method string `json:"method"`;Params struct{Name string `json:"name"`;Arguments map[string]json.RawMessage `json:"arguments"`} `json:"params"`}
- if decode(r,&q)!=nil{fail(w,400,"Invalid JSON-RPC request.");return};if len(q.ID)==0{w.WriteHeader(202);return};var result any=map[string]any{}
+ if decode(w,r,&q)!=nil{fail(w,400,"Invalid JSON-RPC request.");return};if len(q.ID)==0{w.WriteHeader(202);return};var result any=map[string]any{}
  switch q.Method{
  case "initialize":result=map[string]any{"protocolVersion":"2025-03-26","capabilities":map[string]any{"tools":map[string]any{}},"serverInfo":map[string]string{"name":"echo-assist","version":"2.0.0"}}
  case "ping":result=map[string]any{}
