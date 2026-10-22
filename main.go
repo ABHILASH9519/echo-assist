@@ -153,18 +153,18 @@ func (a *App)assistant(w http.ResponseWriter, r *http.Request) {
  addPattern := regexp.MustCompile("(?i)^(?:add|create|remember|remind me to)\\s+(.+)$")
  if match := addPattern.FindStringSubmatch(msg); len(match) == 2 {
   title := strings.TrimSpace(match[1])
+  var due *string
+  duePattern := regexp.MustCompile("(?i)\\s+(?:due|by)\\s+(\\d{4}-\\d{2}-\\d{2})")
+  if dueMatch := duePattern.FindStringSubmatch(title); len(dueMatch) == 2 {
+   value := dueMatch[1]
+   due = &value
+   title = duePattern.ReplaceAllString(title, "")
+  }
   prio := "medium"
   priorityPattern := regexp.MustCompile("(?i)\\s+priority\\s+(low|medium|high)\\s*$")
   if priorityMatch := priorityPattern.FindStringSubmatch(title); len(priorityMatch) == 2 {
    prio = strings.ToLower(priorityMatch[1])
    title = priorityPattern.ReplaceAllString(title, "")
-  }
-  var due *string
-  duePattern := regexp.MustCompile("(?i)\\s+(?:due|by)\\s+(\\d{4}-\\d{2}-\\d{2})\\s*$")
-  if dueMatch := duePattern.FindStringSubmatch(title); len(dueMatch) == 2 {
-   value := dueMatch[1]
-   due = &value
-   title = duePattern.ReplaceAllString(title, "")
   }
   task, err := a.store.create(title, "", prio, due)
   if err != nil {
