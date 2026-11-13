@@ -1,73 +1,67 @@
-# Echo Assist
+# Echo Assist — Go backend
 
-Echo Assist is a productivity command center with a task dashboard, REST API, MCP task tools, and optional Amazon Bedrock responses.
+Echo Assist is a productivity command center with an HTML/CSS/JavaScript frontend and a Go backend. The Go service provides task management, agenda and statistics APIs, optional PostgreSQL persistence, optional Amazon Bedrock responses, and stateless MCP task tools.
 
 ## Features
 
-- Create, search, list, complete, and delete tasks.
-- Set task priority (low, medium, high) and optional due dates.
-- Daily agenda endpoint shows tasks due today and overdue tasks.
-- Natural-language task commands: `add prepare demo`, `list my tasks`, `complete prepare demo`, and `agenda today`.
-- Add task metadata in a command, e.g. `add prepare demo priority high due 2026-10-30`.
-- MCP Streamable HTTP endpoint at `POST /mcp` with `add_task`, `list_tasks`, and `complete_task` tools.
-- Optional PostgreSQL persistence when `DATABASE_URL` is configured; JSON-file fallback for local prototyping.
-- Optional Amazon Bedrock Converse API for open-ended assistant responses. The UI reports whether Bedrock is configured.
+- Create, search, filter, paginate, update, complete, and delete tasks.
+- Validate task titles, priorities, and due dates.
+- Task priority (low, medium, high) and due dates.
+- Daily agenda endpoint separates due-today and overdue tasks, sorted by priority.
+- Statistics endpoint returns open/completed counts, overdue and due-today counts, and priority breakdown.
+- Natural-language task commands for adding, listing, completing, and reviewing agenda tasks.
+- MCP HTTP endpoint at POST /mcp with add_task, list_tasks, and complete_task tools.
+- PostgreSQL persistence when DATABASE_URL is configured; JSON-file fallback for local development.
+- Optional Amazon Bedrock Converse API for open-ended assistant responses.
+- Request size limits, security headers, graceful shutdown, and automated API/MCP tests.
 
 ## Run locally
 
-Requires Node.js 22 or later.
+Requires Go 1.24 or later.
 
-```bash
-npm install
-cp .env.example .env
-npm start
-```
+    go mod download
+    go run .
 
-On Windows PowerShell, use `Copy-Item .env.example .env` instead of `cp`. Open http://localhost:3000.
+Open http://localhost:3000. Keep the public directory alongside the executable.
 
-## Storage
+## Configuration
 
-For durable storage, provision a PostgreSQL database and set `DATABASE_URL` in the app's runtime environment. The server creates the `echo_tasks` table on startup. For a TLS-enabled provider, leave `PGSSL` unset. Set `PGSSL=disable` only for local PostgreSQL without TLS.
+- PORT defaults to 3000.
+- AWS_REGION defaults to ap-south-1.
+- APP_TIMEZONE defaults to Asia/Kolkata. Use an IANA time-zone name.
+- BEDROCK_MODEL_ID must be set to a model ID available to your AWS account and region.
+- DATABASE_URL enables PostgreSQL storage. For Render, set it in the service's Environment settings using the database's **internal connection string**. Never paste credentials into source control or chat.
+- Configure AWS credentials through a secret manager or environment variables in the hosting dashboard. Do not commit AWS keys.
 
-Without `DATABASE_URL`, tasks are stored in `.data/tasks.json` (or the directory set by `DATA_DIR`). That file is not durable on an ephemeral hosting filesystem.
-
-## Amazon Bedrock (optional)
-
-1. Ensure your AWS account has access to a supported Bedrock model in your chosen region.
-2. Set `AWS_REGION` and `BEDROCK_MODEL_ID` in the runtime environment.
-3. Configure AWS credentials using an IAM role or your host's secret manager. Never commit credentials.
-4. Verify `GET /api/health` reports `aiConfigured: true`, then send an open-ended assistant request and verify the response.
-
-Task-management commands are handled by the application itself and report `mode: local`. Open-ended responses use Bedrock only when the model ID and valid AWS credentials are available, and report `mode: bedrock`. A configured model ID alone does not guarantee that model access works.
+Health reports the runtime language, storage mode, database connectivity, AI credential readiness, configured time zone, task count, and uptime. A configured model ID alone is not enough: AWS credentials must also be available.
 
 ## API
 
-- `GET /api/health` — app status, storage mode, Bedrock configuration status.
-- `GET /api/tasks`
-- `POST /api/tasks` with `{"title":"Prepare demo","priority":"high","dueDate":"2026-10-30"}`
-- `PATCH /api/tasks/:id` — update title, details, priority, or due date.
-- `PATCH /api/tasks/:id/complete`
-- `DELETE /api/tasks/:id`
-- `GET /api/agenda?date=2026-10-30`
-- `POST /api/assistant` with `{"message":"Add prepare demo priority high due 2026-10-30"}`
+- GET /api/health
+- GET /api/tasks?status=open&priority=high&q=demo&limit=50&offset=0
+- POST /api/tasks with a JSON title, optional details, priority, and dueDate
+- PATCH /api/tasks/:id
+- PATCH /api/tasks/:id/complete
+- DELETE /api/tasks/:id
+- GET /api/stats
+- GET /api/agenda?date=YYYY-MM-DD
+- POST /api/assistant with a JSON message
+- POST /mcp for MCP JSON-RPC initialization, tool discovery, and tool calls
 
-## MCP
+Task-list query parameters are optional. status accepts open, completed, or all; priority accepts low, medium, or high; limit is 1–200.
 
-The server exposes a stateless Streamable HTTP MCP endpoint at `/mcp`. Use an MCP client that supports Streamable HTTP and point it to your deployed base URL plus `/mcp`. Verify with a real MCP inspector/client before describing this integration as tested.
+## Deploy to Render
 
-## Deployment notes
+The Dockerfile and render.yaml define a separate Go service. The existing Node deployment is intentionally kept as a fallback until the Go service is fully verified.
 
-The app listens on `0.0.0.0` and uses `PORT`. Set `DATABASE_URL` to a managed database for durable production storage. Some serverless or ephemeral filesystems reset data on restart/redeploy.
+1. Configure DATABASE_URL with the internal connection string from the Render PostgreSQL dashboard.
+2. Set BEDROCK_MODEL_ID and AWS credentials in Render's Environment settings if open-ended AI responses are required.
+3. Set APP_TIMEZONE to the intended user time zone.
+4. Verify /api/health reports storage=postgres, databaseHealthy=true, and aiConfigured=true when those integrations are configured.
+5. Test task create/update/complete/delete, agenda, stats, and MCP tools before switching the primary URL.
+
+The current Render free PostgreSQL database has an expiry date shown in its dashboard. File storage on ephemeral hosting may be lost after restarts; PostgreSQL is recommended for durable task data.
 
 ## Security and limitations
 
-This is a hackathon MVP, not a multi-user production service. It has no authentication or per-user task isolation. Do not store sensitive personal data. Configure Bedrock and database access through IAM/host secrets. Before production, add authentication, user-scoped data access, request rate limiting, structured logging, and end-to-end tests.
-
-## Hackathon submission checklist
-
-- [ ] Test task CRUD and priority/due-date behavior in the deployed app.
-- [ ] Verify the MCP endpoint with a real MCP client.
-- [ ] Configure and verify a real Bedrock response before claiming the integration is active.
-- [ ] Verify PostgreSQL is active in `/api/health` before claiming durable database storage is live.
-- [ ] Record a public English demo video under the event's time limit.
-- [ ] Keep the Devpost description aligned with verified features.
+This is a hackathon MVP without authentication or per-user task isolation. Anyone who can reach the public endpoint may be able to read or change shared tasks. Do not store sensitive personal data. Before production, add authentication, user-scoped access, rate limiting, and a dedicated MCP client compatibility test. Verify a real Bedrock response before claiming the AI integration is live.
