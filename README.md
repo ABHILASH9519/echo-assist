@@ -1,5 +1,23 @@
 # Echo Assist
 
+<!-- portfolio-visual-start -->
+## Engineering overview
+
+![MCP](https://img.shields.io/badge/Stack-MCP-176b99) ![Stars](https://img.shields.io/github/stars/ABHILASH9519/echo-assist)
+
+![Animated workflow](docs/portfolio-flow.svg)
+
+```mermaid
+flowchart LR
+  N0["Dashboard or MCP"] --> N1["Node API"] --> N2["Task tools"] --> N3["Storage"]
+```
+
+Illustrative workflow: Dashboard or MCP → Node API → Task tools → Storage. See the implementation and setup below for actual capabilities and prerequisites.
+
+[Developer profile](https://github.com/ABHILASH9519) · [Issues](https://github.com/ABHILASH9519/echo-assist/issues)
+<!-- portfolio-visual-end -->
+
+
 Echo Assist is a productivity command center with a task dashboard, REST API, MCP task tools, and optional Amazon Bedrock responses.
 
 ## Features
