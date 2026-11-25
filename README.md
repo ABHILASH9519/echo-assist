@@ -89,3 +89,24 @@ This is a hackathon MVP, not a multi-user production service. It has no authenti
 - [ ] Verify PostgreSQL is active in `/api/health` before claiming durable database storage is live.
 - [ ] Record a public English demo video under the event's time limit.
 - [ ] Keep the Devpost description aligned with verified features.
+
+
+## Technical walkthrough
+
+```mermaid
+sequenceDiagram
+    participant P0 as Client
+    participant P1 as MCP or REST
+    participant P2 as Task service
+    participant P3 as Storage
+    P0->>P1: MCP or REST
+    P1->>P2: Task service
+    P2->>P3: Storage
+    P3-->>P0: Result or status
+```
+
+This sequence is a conceptual review aid, not a recorded execution trace. Consult the implementation and existing run instructions for supported behavior.
+
+![Last commit](https://img.shields.io/github/last-commit/ABHILASH9519/echo-assist) ![Open issues](https://img.shields.io/github/issues/ABHILASH9519/echo-assist)
+
+**Review focus:** task-management API and MCP integration, with optional Amazon Bedrock support. No Amazon endorsement or production deployment is implied.
